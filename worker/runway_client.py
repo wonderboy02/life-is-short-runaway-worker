@@ -1,16 +1,15 @@
 """
-Runway ML API Client for I2V Generation
+Runway ML API Client for I2V Generation (using official SDK)
 """
-import os
-import time
 import base64
 import requests
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
+from runwayml import RunwayML
 
 
 class RunwayClient:
-    """Client for Runway ML Gen-4 / Veo 3.1 API"""
+    """Client for Runway ML Gen-4 / Veo 3.1 API (using official SDK)"""
 
     def __init__(self, api_key: str, model: str = "gen4_turbo", timeout: int = 600):
         """
@@ -24,12 +23,7 @@ class RunwayClient:
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
-        self.base_url = "https://api.runwayml.com/v1"
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "X-Runway-Version": "2024-11-06",
-            "Content-Type": "application/json"
-        }
+        self.client = RunwayML(api_key=api_key)
 
     def generate_video(
         self,
@@ -67,23 +61,29 @@ class RunwayClient:
         # Convert image to data URI
         image_uri = self._image_to_data_uri(input_image_path)
 
-        # Create I2V task
+        # Use model override if provided
         model = model_override or self.model
-        task_id = self._create_i2v_task(
-            image_uri=image_uri,
-            prompt=prompt,
-            duration=duration,
-            ratio=ratio,
-            model=model
-        )
 
-        # Wait for completion
-        video_url = self._wait_for_completion(task_id, timeout=self.timeout)
+        # Create I2V task and wait for completion using SDK
+        try:
+            task = self.client.image_to_video.create(
+                model=model,
+                prompt_image=image_uri,
+                prompt_text=prompt,
+                duration=int(duration),
+                ratio=ratio
+            ).wait_for_task_output()
 
-        # Download video
-        self._download_video(video_url, output_video_path)
+            # Get video URL from task output
+            video_url = task.output[0]
 
-        return output_video_path
+            # Download video
+            self._download_video(video_url, output_video_path)
+
+            return output_video_path
+
+        except Exception as e:
+            raise Exception(f"Runway video generation failed: {str(e)}")
 
     def _image_to_data_uri(self, image_path: str) -> str:
         """
@@ -113,82 +113,6 @@ class RunwayClient:
 
         return f"data:{mime_type};base64,{b64_data}"
 
-    def _create_i2v_task(
-        self,
-        image_uri: str,
-        prompt: str,
-        duration: float,
-        ratio: str,
-        model: str
-    ) -> str:
-        """
-        Create Runway I2V generation task
-
-        Returns:
-            Task ID
-        """
-        url = f"{self.base_url}/image_to_video"
-        payload = {
-            "model": model,
-            "promptImage": image_uri,
-            "promptText": prompt,
-            "duration": duration,
-            "ratio": ratio
-        }
-
-        try:
-            response = requests.post(url, headers=self.headers, json=payload, timeout=30)
-            response.raise_for_status()
-            result = response.json()
-            return result["id"]
-
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"Runway task creation failed: {str(e)}")
-
-    def _wait_for_completion(self, task_id: str, timeout: int, poll_interval: int = 5) -> str:
-        """
-        Poll task until completion
-
-        Args:
-            task_id: Runway task ID
-            timeout: Maximum wait time in seconds
-            poll_interval: Polling interval in seconds
-
-        Returns:
-            Video URL
-
-        Raises:
-            Exception if task fails or times out
-        """
-        start_time = time.time()
-        url = f"{self.base_url}/tasks/{task_id}"
-
-        while time.time() - start_time < timeout:
-            try:
-                response = requests.get(url, headers=self.headers, timeout=30)
-                response.raise_for_status()
-                result = response.json()
-
-                status = result.get("status")
-                elapsed = int(time.time() - start_time)
-
-                if status == "SUCCEEDED":
-                    return result["output"][0]  # Video URL
-                elif status == "FAILED":
-                    failure_reason = result.get("failure", "Unknown error")
-                    raise Exception(f"Runway task failed: {failure_reason}")
-                elif status in ["PENDING", "RUNNING"]:
-                    # Still processing, continue polling
-                    time.sleep(poll_interval)
-                else:
-                    raise Exception(f"Unknown task status: {status}")
-
-            except requests.exceptions.RequestException as e:
-                # Retry on network errors
-                time.sleep(poll_interval)
-
-        raise TimeoutError(f"Task {task_id} timed out after {timeout}s")
-
     def _download_video(self, video_url: str, dest_path: str):
         """
         Download video from Runway URL
@@ -207,23 +131,3 @@ class RunwayClient:
 
         except Exception as e:
             raise Exception(f"Video download failed: {str(e)}")
-
-    def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        """
-        Get current task status
-
-        Args:
-            task_id: Runway task ID
-
-        Returns:
-            Task status dict
-        """
-        url = f"{self.base_url}/tasks/{task_id}"
-
-        try:
-            response = requests.get(url, headers=self.headers, timeout=30)
-            response.raise_for_status()
-            return response.json()
-
-        except requests.exceptions.RequestException as e:
-            raise Exception(f"Failed to get task status: {str(e)}")
