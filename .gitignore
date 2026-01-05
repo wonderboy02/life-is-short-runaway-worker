@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+worker/config.yaml
+
+# Logs
+logs/
+*.log
+
+# Temp files
+temp/
+*.tmp
+
+# IDE and tooling (keep .vscode for team consistency)
+# .vscode/
+.idea/
+.serena/
+.claude/
+*.swp
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+

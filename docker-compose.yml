@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  runway-worker:
+    build: .
+    container_name: runway-worker-001
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+      - ./worker/config.yaml:/app/worker/config.yaml:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+    networks:
+      - runway-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+networks:
+  runway-network:
+    driver: bridge

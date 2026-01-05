@@ -1,0 +1,14 @@
+# HTTP 클라이언트
+requests==2.31.0
+
+# YAML 파싱
+pyyaml==6.0.1
+
+# 이미지 처리
+Pillow==10.2.0
+
+# 로깅
+python-json-logger==2.0.7
+
+# 환경 변수
+python-dotenv==1.0.0
