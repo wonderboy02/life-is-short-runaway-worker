@@ -10,6 +10,58 @@ Runway Gen-4/Veo API를 사용한 Image-to-Video 추론 Worker
 - Heartbeat으로 lease 연장
 - 자동 재시도 및 에러 처리
 
+## 📋 사전 요구사항 및 서버 설정
+
+### Linux SSH 서버에서 처음 설치하는 경우
+
+#### 1. Docker 설치 확인 및 설치
+
+```bash
+# SSH로 서버 접속 후 Docker 설치 확인
+docker --version
+docker-compose --version
+```
+
+**Docker가 설치되어 있지 않다면:**
+
+```bash
+# Ubuntu/Debian
+sudo apt update
+sudo apt install -y docker.io docker-compose
+
+# Docker 서비스 시작 및 부팅 시 자동 시작 설정
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# 현재 사용자를 docker 그룹에 추가 (sudo 없이 docker 사용 가능)
+sudo usermod -aG docker $USER
+
+# 그룹 변경 적용 (재로그인 대신)
+newgrp docker
+
+# 설치 확인
+docker --version
+```
+
+#### 2. 프로젝트 파일 서버에 업로드
+
+**방법 1: Git으로 클론 (추천)**
+```bash
+cd ~
+git clone <your-repository-url> life_is_short_runaway_worker
+cd life_is_short_runaway_worker
+```
+
+**방법 2: SCP로 파일 복사 (로컬 컴퓨터에서)**
+```bash
+scp -r /path/to/life_is_short_runaway_worker user@server-ip:/home/user/
+```
+
+**방법 3: rsync 사용**
+```bash
+rsync -avz /path/to/life_is_short_runaway_worker/ user@server-ip:/home/user/life_is_short_runaway_worker/
+```
+
 ## 🚀 빠른 시작
 
 ### 1. 환경 설정
@@ -46,6 +98,29 @@ tail -f logs/runway-worker-001_*.log
 
 # Docker 로그
 docker-compose logs -f runway-worker
+```
+
+### 전체 프로세스 요약 (Linux 서버 처음 설정)
+
+```bash
+# 1. Docker 설치 (설치되어 있지 않은 경우)
+sudo apt update && sudo apt install -y docker.io docker-compose
+sudo systemctl enable docker && sudo systemctl start docker
+sudo usermod -aG docker $USER && newgrp docker
+
+# 2. 프로젝트 클론
+git clone <your-repo-url> life_is_short_runaway_worker
+cd life_is_short_runaway_worker
+
+# 3. 환경 변수 설정
+cp .env.example .env
+nano .env  # API 키 입력 후 저장
+
+# 4. 실행
+docker-compose up -d
+
+# 5. 로그 확인
+docker-compose logs -f
 ```
 
 ## 📂 프로젝트 구조
@@ -128,6 +203,8 @@ python scripts/test_runway_api.py
 
 ## 🐳 Docker 명령어
 
+### 기본 명령어
+
 ```bash
 # 빌드
 docker-compose build
@@ -141,7 +218,7 @@ docker-compose logs -f
 # 중지
 docker-compose down
 
-# 재시작
+# 재시작 (환경 변수 변경 시 사용 안 됨!)
 docker-compose restart
 
 # 상태 확인
@@ -149,6 +226,38 @@ docker-compose ps
 
 # 컨테이너 접속
 docker-compose exec runway-worker bash
+```
+
+### 환경 변수 변경 후 재시작
+
+**.env 파일이나 config.yaml을 수정한 후에는 반드시 다음 명령어 사용:**
+
+```bash
+# 방법 1: 컨테이너 중지 후 재시작 (추천)
+docker-compose down
+docker-compose up -d
+
+# 방법 2: 강제 재생성
+docker-compose up -d --force-recreate
+
+# 방법 3: 코드 변경 시 (이미지 재빌드 포함)
+docker-compose down
+docker-compose up -d --build
+
+# ⚠️ 주의: restart는 환경 변수를 새로 로드하지 않습니다
+# docker-compose restart  # 이건 환경 변수 갱신 안 됨!
+```
+
+### 환경 변수 확인
+
+```bash
+# 실행 중인 컨테이너의 모든 환경 변수 확인
+docker-compose exec runway-worker env
+
+# 특정 환경 변수만 확인
+docker-compose exec runway-worker printenv RUNWAY_API_KEY
+docker-compose exec runway-worker printenv WORKER_API_KEY
+docker-compose exec runway-worker printenv NEXT_API_URL
 ```
 
 ## 🔍 모니터링
@@ -169,6 +278,110 @@ docker inspect runway-worker-001 --format='{{.State.Health.Status}}'
 - `INFO`: 일반 정보 (폴링, task 처리 등)
 - `WARNING`: 경고 (heartbeat 실패 등)
 - `ERROR`: 에러 (task 실패, API 에러 등)
+
+## 🔄 자동 재시작 및 부팅 설정
+
+### 프로세스 크래시 시 자동 재시작
+
+`docker-compose.yml`에 이미 `restart: unless-stopped` 설정이 되어 있어 다음이 자동으로 처리됩니다:
+
+- ✅ **프로세스 크래시 시**: 자동 재시작
+- ✅ **서버 재부팅 시**: 자동 시작
+- ✅ **Docker 데몬 재시작 시**: 자동 시작
+- ❌ **수동으로 중지한 경우**: 재시작 안 함 (의도적)
+
+### 서버 부팅 시 자동 실행 설정
+
+Docker 서비스가 부팅 시 자동으로 시작되도록 설정:
+
+```bash
+# Docker 서비스 자동 시작 여부 확인
+sudo systemctl is-enabled docker
+# "enabled"가 나오면 이미 설정됨
+
+# Docker 서비스 부팅 시 자동 시작 활성화
+sudo systemctl enable docker
+
+# Docker 서비스 시작
+sudo systemctl start docker
+
+# 상태 확인
+sudo systemctl status docker
+```
+
+### 재시작 정책 변경 (선택 사항)
+
+더 강력한 재시작을 원한다면 `docker-compose.yml` 수정:
+
+```yaml
+# restart: unless-stopped  # 기본값 (추천)
+restart: always  # 수동 중지해도 재시작 (더 강력함)
+```
+
+변경 후 적용:
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+### 자동 재시작 테스트
+
+```bash
+# 1. 프로세스 강제 종료 테스트
+docker kill runway-worker-001
+# 몇 초 후 다시 살아나는지 확인
+docker-compose ps
+
+# 2. 컨테이너 재시작 횟수 확인
+docker inspect runway-worker-001 --format='{{.RestartCount}}'
+
+# 3. 마지막 재시작 시간 확인
+docker inspect runway-worker-001 --format='{{.State.StartedAt}}'
+
+# 4. 서버 재부팅 테스트
+sudo reboot
+# 재접속 후 확인
+docker-compose ps
+```
+
+### (고급) Systemd 서비스로 관리
+
+더 견고한 관리를 원한다면 systemd 서비스 생성:
+
+```bash
+# 서비스 파일 생성
+sudo nano /etc/systemd/system/runway-worker.service
+```
+
+**서비스 파일 내용:**
+```ini
+[Unit]
+Description=Runway Worker for Life is Short
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/YOUR_USER/life_is_short_runaway_worker
+ExecStart=/usr/bin/docker-compose up -d
+ExecStop=/usr/bin/docker-compose down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**활성화:**
+```bash
+# YOUR_USER를 실제 사용자명으로 변경한 후
+sudo systemctl daemon-reload
+sudo systemctl enable runway-worker.service
+sudo systemctl start runway-worker.service
+
+# 상태 확인
+sudo systemctl status runway-worker.service
+```
 
 ## ❓ FAQ
 
@@ -207,6 +420,38 @@ WORKER_ID=runway-worker-002 docker-compose up -d
 ```
 
 Lease 기반 큐라서 중복 처리 없음.
+
+### Q5. 환경 변수를 변경했는데 적용이 안 됩니다.
+
+**해결 방법:**
+```bash
+# ❌ 잘못된 방법
+docker-compose restart  # 환경 변수 새로 로드 안 됨!
+
+# ✅ 올바른 방법
+docker-compose down
+docker-compose up -d
+
+# 또는
+docker-compose up -d --force-recreate
+```
+
+`restart` 명령어는 컨테이너를 재시작만 하고 환경 변수를 새로 로드하지 않습니다.
+반드시 `down` → `up` 순서로 실행하세요.
+
+### Q6. 서버 재부팅 후 Worker가 자동으로 시작되지 않습니다.
+
+**해결 방법:**
+```bash
+# Docker 서비스 자동 시작 설정
+sudo systemctl enable docker
+sudo systemctl start docker
+
+# 확인
+sudo systemctl is-enabled docker  # "enabled" 출력되어야 함
+```
+
+Docker 서비스가 부팅 시 자동으로 시작되어야 컨테이너도 함께 시작됩니다.
 
 ## 📚 관련 문서
 
