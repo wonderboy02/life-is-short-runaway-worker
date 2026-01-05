@@ -59,10 +59,17 @@ class RunwayWorker:
         self.heartbeat_active = False
         self.heartbeat_interval = self.config.get("heartbeat_interval", 120)
 
+        # Adaptive polling control
+        self.last_task_time = None
+        self.polling_interval_slow = self.config.get("polling_interval_slow", 60)
+        self.polling_interval_fast = self.config.get("polling_interval_fast", 5)
+        self.fast_polling_duration = self.config.get("fast_polling_duration", 1800)
+
         self.logger.info("="*60)
         self.logger.info(f"Worker initialized: {self.config['worker_id']}")
         self.logger.info(f"Next.js API: {self.config['vercel_api_url']}")
         self.logger.info(f"Runway Model: {self.config.get('runway_model', 'gen4_turbo')}")
+        self.logger.info(f"Polling: {self.polling_interval_slow}s (slow) / {self.polling_interval_fast}s (fast after task)")
         self.logger.info("="*60)
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
@@ -243,6 +250,22 @@ class RunwayWorker:
             self.heartbeat_active = False
             heartbeat_thread.join(timeout=1)
 
+    def _get_polling_interval(self) -> int:
+        """
+        Calculate current polling interval based on last task time
+
+        Returns:
+            Polling interval in seconds (fast or slow)
+        """
+        if self.last_task_time is None:
+            return self.polling_interval_slow
+
+        elapsed = time.time() - self.last_task_time
+        if elapsed < self.fast_polling_duration:
+            return self.polling_interval_fast
+        else:
+            return self.polling_interval_slow
+
     def run(self):
         """Main polling loop"""
         # Register signal handlers
@@ -250,11 +273,13 @@ class RunwayWorker:
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
         self.logger.info("Starting polling loop...")
-        self.logger.info(f"Polling interval: {self.config['polling_interval']} seconds")
         self.logger.info("")
 
         while not self.shutdown_requested:
             try:
+                # Calculate current polling interval
+                current_interval = self._get_polling_interval()
+
                 # Get next task
                 self.logger.info("[POLLING] Requesting next task...")
                 task = self.api_client.get_next_task(
@@ -263,15 +288,20 @@ class RunwayWorker:
 
                 if task is None:
                     self.logger.info("[IDLE] No task available")
-                    self.logger.info(f"Waiting {self.config['polling_interval']} seconds...")
+                    self.logger.info(f"Waiting {current_interval} seconds...")
                     self.logger.info("")
-                    time.sleep(self.config["polling_interval"])
+                    time.sleep(current_interval)
                     continue
 
                 # Process task
                 self.logger.info(f"[TASK RECEIVED] item_id: {task['item_id']}")
                 self.logger.info("")
                 success = self.process_task(task)
+
+                # Update last task time after processing
+                self.last_task_time = time.time()
+                self.logger.info(f"Task completed. Switching to fast polling ({self.polling_interval_fast}s) for {self.fast_polling_duration}s")
+                self.logger.info("")
 
                 # Brief pause before next poll
                 time.sleep(1)
@@ -282,8 +312,9 @@ class RunwayWorker:
 
             except Exception as e:
                 log_error(self.logger, "Error in main loop", e)
-                self.logger.info(f"Retrying in {self.config['polling_interval']} seconds...")
-                time.sleep(self.config["polling_interval"])
+                current_interval = self._get_polling_interval()
+                self.logger.info(f"Retrying in {current_interval} seconds...")
+                time.sleep(current_interval)
 
         self.logger.info("Worker shutdown complete")
 

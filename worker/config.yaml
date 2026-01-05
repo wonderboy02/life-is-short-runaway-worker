@@ -8,14 +8,17 @@ worker_id: "${WORKER_ID}"
 
 # 고정 설정
 worker_type: "runway"
-polling_interval: 5
 api_timeout: 30
 lease_duration_seconds: 600
 heartbeat_interval: 120
 runway_timeout: 600
-runway_poll_interval: 5
 runway_default_duration: 5.0
 runway_default_ratio: "1280:720"
 temp_dir: "./temp"
 log_dir: "./logs"
 auto_cleanup_temp: true
+
+# 적응형 폴링 설정
+polling_interval_slow: 60  # 평소: 1분에 1번
+polling_interval_fast: 5   # 작업 후: 5초에 1번
+fast_polling_duration: 1800  # 빠른 폴링 지속 시간: 30분 (1800초)
