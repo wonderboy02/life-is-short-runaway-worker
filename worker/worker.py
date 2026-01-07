@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from logger import setup_logger, log_task_start, log_task_complete, log_step, log_error
 from api_client import VercelAPIClient
-from storage import upload_file, cleanup_file
+from storage import download_file, upload_file, cleanup_file
 from runway_client import RunwayClient
 
 
@@ -151,7 +151,9 @@ class RunwayWorker:
         else:
             duration = self.config.get("runway_default_duration", 5.0)
 
-        # Define temp file paths (only output needed now)
+        # Define temp file paths
+        input_filename = Path(photo_storage_path).name
+        temp_input = Path(self.config["temp_dir"]) / f"{item_id}_input{Path(input_filename).suffix}"
         temp_output = Path(self.config["temp_dir"]) / f"{item_id}_output.mp4"
 
         # Start heartbeat thread
@@ -163,21 +165,25 @@ class RunwayWorker:
         runway_task_id = None
 
         try:
-            # Step 1: Get presigned download URL (direct use for Runway API)
-            log_step(self.logger, 1, "Getting image URL...")
+            # Step 1: Get presigned download URL
+            log_step(self.logger, 1, "Getting download URL...")
             presign_data = self.api_client.get_presigned_download_url(photo_storage_path)
-            image_url = presign_data["url"]
-            self.logger.info(f"Image URL obtained: {image_url[:80]}...")
+            download_url = presign_data["url"]
 
-            # Step 2: Run Runway I2V generation (using URL directly)
-            log_step(self.logger, 2, "Calling Runway API...")
+            # Step 2: Download input image
+            log_step(self.logger, 2, f"Downloading input image: {input_filename}")
+            download_file(download_url, str(temp_input))
+            self.logger.info(f"Downloaded to: {temp_input}")
+
+            # Step 3: Run Runway I2V generation (uploads to Runway, then generates)
+            log_step(self.logger, 3, "Uploading to Runway and generating video...")
             self.logger.info(f"Prompt: {prompt}")
             self.logger.info(f"Model: {model}")
             self.logger.info(f"Duration: {duration:.2f}s")
             self.logger.info(f"Ratio: {self.config.get('runway_default_ratio', '1280:720')}")
 
             self.runway_client.generate_video(
-                input_image_url=image_url,  # Use presigned URL directly
+                input_image_path=str(temp_input),
                 output_video_path=str(temp_output),
                 prompt=prompt,
                 duration=duration,
@@ -186,8 +192,8 @@ class RunwayWorker:
             )
             self.logger.info(f"Generation complete: {temp_output}")
 
-            # Step 3: Get presigned upload URL
-            log_step(self.logger, 3, "Getting upload URL...")
+            # Step 4: Get presigned upload URL
+            log_step(self.logger, 4, "Getting upload URL...")
             presign_data = self.api_client.get_presigned_upload_url(
                 video_item_id=item_id,
                 file_extension="mp4"
@@ -195,13 +201,13 @@ class RunwayWorker:
             upload_url = presign_data["url"]
             video_storage_path = presign_data["storage_path"]
 
-            # Step 4: Upload result
-            log_step(self.logger, 4, "Uploading result video...")
+            # Step 5: Upload result
+            log_step(self.logger, 5, "Uploading result video...")
             upload_file(str(temp_output), upload_url, "video/mp4")
             self.logger.info(f"Uploaded to: {video_storage_path}")
 
-            # Step 5: Report success
-            log_step(self.logger, 5, "Reporting task completion...")
+            # Step 6: Report success
+            log_step(self.logger, 6, "Reporting task completion...")
             self.api_client.report_task_result(
                 item_id=item_id,
                 status="completed",
@@ -213,6 +219,7 @@ class RunwayWorker:
 
             # Cleanup temp files
             if self.config.get("auto_cleanup_temp", True):
+                cleanup_file(str(temp_input))
                 cleanup_file(str(temp_output))
 
             return True
@@ -233,6 +240,7 @@ class RunwayWorker:
             log_task_complete(self.logger, item_id, "FAILED")
 
             # Cleanup temp files
+            cleanup_file(str(temp_input))
             cleanup_file(str(temp_output))
 
             return False

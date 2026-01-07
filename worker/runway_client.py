@@ -24,10 +24,70 @@ class RunwayClient:
         self.model = model
         self.timeout = timeout
         self.client = RunwayML(api_key=api_key)
+        self.upload_url = "https://api.dev.runwayml.com/v1/uploads"
+
+    def upload_image(self, image_path: str) -> str:
+        """
+        Upload image to Runway's ephemeral storage
+
+        Args:
+            image_path: Path to local image file
+
+        Returns:
+            runway:// URI for the uploaded image
+
+        Raises:
+            Exception if upload fails
+        """
+        if not Path(image_path).exists():
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+
+        filename = Path(image_path).name
+
+        try:
+            # Step 1: Request upload URL
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "X-Runway-Version": "2024-11-06",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "filename": filename,
+                "type": "ephemeral"
+            }
+
+            response = requests.post(
+                self.upload_url,
+                json=payload,
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            upload_data = response.json()
+
+            upload_url = upload_data["uploadUrl"]
+            fields = upload_data["fields"]
+            runway_uri = upload_data["runwayUri"]
+
+            # Step 2: Upload file using multipart form data
+            with open(image_path, 'rb') as f:
+                files = {'file': (filename, f)}
+                upload_response = requests.post(
+                    upload_url,
+                    data=fields,
+                    files=files,
+                    timeout=60
+                )
+                upload_response.raise_for_status()
+
+            return runway_uri
+
+        except Exception as e:
+            raise Exception(f"Runway image upload failed: {str(e)}")
 
     def generate_video(
         self,
-        input_image_url: str,
+        input_image_path: str,
         output_video_path: str,
         prompt: str,
         duration: float = 5.0,
@@ -38,7 +98,7 @@ class RunwayClient:
         Generate video from image using Runway I2V
 
         Args:
-            input_image_url: HTTPS URL or data URI of input image (presigned URL from Supabase)
+            input_image_path: Path to local image file
             output_video_path: Path where output video will be saved
             prompt: Text prompt for video generation
             duration: Video duration in seconds (2-10)
@@ -51,12 +111,15 @@ class RunwayClient:
         Raises:
             Exception if generation fails
         """
-        # Validate URL
-        if not input_image_url.startswith(('http://', 'https://', 'data:')):
-            raise ValueError(f"Invalid image URL format: {input_image_url}")
+        # Validate input file
+        if not Path(input_image_path).exists():
+            raise FileNotFoundError(f"Input image not found: {input_image_path}")
 
         # Ensure output directory exists
         Path(output_video_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # Upload image to Runway and get runway:// URI
+        runway_uri = self.upload_image(input_image_path)
 
         # Use model override if provided
         model = model_override or self.model
@@ -65,7 +128,7 @@ class RunwayClient:
         try:
             task = self.client.image_to_video.create(
                 model=model,
-                prompt_image=input_image_url,  # Use URL directly (HTTPS or data URI)
+                prompt_image=runway_uri,  # Use runway:// URI from upload
                 prompt_text=prompt,
                 duration=int(duration),
                 ratio=ratio
