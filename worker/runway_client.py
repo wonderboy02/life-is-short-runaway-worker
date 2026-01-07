@@ -27,7 +27,7 @@ class RunwayClient:
 
     def generate_video(
         self,
-        input_image_path: str,
+        input_image_url: str,
         output_video_path: str,
         prompt: str,
         duration: float = 5.0,
@@ -38,7 +38,7 @@ class RunwayClient:
         Generate video from image using Runway I2V
 
         Args:
-            input_image_path: Path to input image
+            input_image_url: HTTPS URL or data URI of input image (presigned URL from Supabase)
             output_video_path: Path where output video will be saved
             prompt: Text prompt for video generation
             duration: Video duration in seconds (2-10)
@@ -51,15 +51,12 @@ class RunwayClient:
         Raises:
             Exception if generation fails
         """
-        # Validate input
-        if not Path(input_image_path).exists():
-            raise FileNotFoundError(f"Input image not found: {input_image_path}")
+        # Validate URL
+        if not input_image_url.startswith(('http://', 'https://', 'data:')):
+            raise ValueError(f"Invalid image URL format: {input_image_url}")
 
         # Ensure output directory exists
         Path(output_video_path).parent.mkdir(parents=True, exist_ok=True)
-
-        # Convert image to data URI
-        image_uri = self._image_to_data_uri(input_image_path)
 
         # Use model override if provided
         model = model_override or self.model
@@ -68,7 +65,7 @@ class RunwayClient:
         try:
             task = self.client.image_to_video.create(
                 model=model,
-                prompt_image=image_uri,
+                prompt_image=input_image_url,  # Use URL directly (HTTPS or data URI)
                 prompt_text=prompt,
                 duration=int(duration),
                 ratio=ratio
