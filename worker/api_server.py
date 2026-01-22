@@ -72,10 +72,15 @@ async def proxy_aligo(path: str, request: Request):
         logger.info(f"Aligo API 프록시: {path} - Status {response.status_code}")
 
         # 알리고 API 응답 반환
+        # Content-Length와 Transfer-Encoding 충돌 방지를 위해 필요한 헤더만 전달
+        response_headers = {
+            "content-type": response.headers.get("content-type", "application/json"),
+        }
+
         return Response(
             content=response.content,
             status_code=response.status_code,
-            headers=dict(response.headers)
+            headers=response_headers
         )
 
     except httpx.TimeoutException:
