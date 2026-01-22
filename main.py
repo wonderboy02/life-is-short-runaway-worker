@@ -37,8 +37,10 @@ def start_fastapi_server():
     """
     from worker.api_server import app
 
-    logger.info("🚀 FastAPI 서버 시작 (포트 8000)...")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    # 환경변수로 로그 레벨 제어 (기본값: info)
+    log_level = os.getenv("UVICORN_LOG_LEVEL", "info").lower()
+    logger.info(f"🚀 FastAPI 서버 시작 (포트 8000, 로그 레벨: {log_level})...")
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level=log_level)
 
 
 def main():
