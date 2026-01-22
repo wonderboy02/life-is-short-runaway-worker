@@ -3,6 +3,11 @@ runwayml
 
 # HTTP 클라이언트
 requests==2.31.0
+httpx==0.27.0  # 비동기 HTTP (알리고 프록시용)
+
+# FastAPI 서버 (알리고 프록시)
+fastapi==0.109.2
+uvicorn[standard]==0.27.1
 
 # YAML 파싱
 pyyaml==6.0.1

@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    ports:
+      - "8000:8000"  # FastAPI (알리고 프록시)
     volumes:
       - ./logs:/app/logs
       - ./temp:/app/temp

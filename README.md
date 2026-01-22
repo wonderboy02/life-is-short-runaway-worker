@@ -4,11 +4,29 @@ Runway Gen-4/Veo API를 사용한 Image-to-Video 추론 Worker
 
 ## 🎯 기능
 
+### 핵심 기능
 - Next.js API에서 video task 폴링
 - Runway Gen-4 Turbo / Gen-4.5 Turbo / Veo 3.1 I2V 생성
 - Supabase Storage에 결과 업로드
 - Heartbeat으로 lease 연장
 - 자동 재시도 및 에러 처리
+
+### 추가 기능 (NEW! 🆕)
+- **알리고 카카오 API 프록시**: Vercel에서 IP 화이트리스트 문제 해결
+  - FastAPI 서버 (포트 8000)
+  - `POST /proxy/aligo/{path}` 엔드포인트
+  - 친구 컴퓨터의 고정 IP를 알리고 화이트리스트에 등록하여 사용
+
+- **Worker 생존 모니터링 (Healthchecks.io)**:
+  - 60초마다 Healthchecks.io에 ping 전송
+  - Worker 프로세스 이상 시 Slack 알림
+  - 설정: `HEALTHCHECK_PING_URL` 환경 변수
+
+- **IP 변경 감지 및 알림**:
+  - 1시간마다 공인 IP 체크
+  - IP 변경 시 Slack으로 자동 알림
+  - 알리고 화이트리스트 재등록 안내
+  - 설정: `SLACK_WEBHOOK_URL` 환경 변수
 
 ## 📋 사전 요구사항 및 서버 설정
 
@@ -79,6 +97,14 @@ cp worker/config.yaml.example worker/config.yaml
 - `RUNWAY_API_KEY`: Runway ML API 키 (https://runwayml.com)
 - `WORKER_API_KEY`: Next.js Worker 인증 토큰
 - `NEXT_API_URL`: Next.js API URL (기본값 사용 가능)
+
+**.env 선택 입력 항목 (모니터링):**
+- `HEALTHCHECK_PING_URL`: Healthchecks.io ping URL (Worker 생존 모니터링)
+  - 설정 방법: https://healthchecks.io 가입 후 Check 생성
+  - 예: `https://hc-ping.com/12345678-1234-1234-1234-123456789abc`
+- `SLACK_WEBHOOK_URL`: Slack Webhook URL (IP 변경 알림)
+  - 설정 방법: Slack App → Incoming Webhooks 활성화
+  - 예: `https://hooks.slack.com/services/T00000000/B00000000/XXXX`
 
 ### 2. Docker 실행
 
@@ -453,6 +479,142 @@ sudo systemctl is-enabled docker  # "enabled" 출력되어야 함
 
 Docker 서비스가 부팅 시 자동으로 시작되어야 컨테이너도 함께 시작됩니다.
 
+## 📱 알리고 카카오 API 프록시 (NEW! 🆕)
+
+이 Worker는 알리고 카카오 API 프록시 서버를 내장하고 있습니다. Vercel은 유동 IP라서 알리고 화이트리스트에 등록할 수 없는 문제를 해결합니다.
+
+### 동작 방식
+
+```
+Vercel → 친구 컴퓨터 (고정 IP 프록시) → 알리고 API
+```
+
+### 설정 방법
+
+**1. 친구 컴퓨터의 공인 IP 확인**
+```bash
+curl ifconfig.me
+# 예: 123.456.789.012
+```
+
+**2. 알리고 관리 페이지에서 IP 등록**
+- 알리고 계정 → 설정 → IP 화이트리스트
+- 위에서 확인한 IP 주소 등록
+
+**3. Vercel에서 프록시 사용**
+
+Vercel API Routes에서:
+```typescript
+// app/api/kakao/send/route.ts
+const response = await fetch('http://친구컴퓨터IP:8000/proxy/aligo/akv10/token/create/30/s/', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+  },
+  body: new URLSearchParams({
+    apikey: process.env.ALIGO_API_KEY,
+    userid: process.env.ALIGO_USER_ID,
+    // ... 기타 파라미터
+  }),
+});
+```
+
+### 프록시 엔드포인트
+
+- `GET /health` - 헬스체크
+- `POST /proxy/aligo/{path}` - 알리고 API 프록시
+- 포트: `8000`
+
+---
+
+## 📊 모니터링 설정 (NEW! 🆕)
+
+Worker의 상태를 실시간으로 모니터링하고 문제 발생 시 알림을 받을 수 있습니다.
+
+### 1. Healthchecks.io 설정 (Worker 생존 모니터링)
+
+**목적**: Worker 프로세스가 죽었는지 자동으로 감지하고 Slack 알림
+
+**설정 방법:**
+
+1. **Healthchecks.io 가입** (무료)
+   - https://healthchecks.io 접속
+   - "Sign Up Free" 클릭
+
+2. **Check 생성**
+   - Name: `Life is Short Worker - taeyang-computer`
+   - Period: `60 seconds`
+   - Grace Time: `180 seconds` (3분)
+   - Save
+
+3. **Check URL 복사**
+   - 예: `https://hc-ping.com/12345678-1234-1234-1234-123456789abc`
+
+4. **Slack 연동**
+   - Integrations 탭 → Add Integration
+   - Slack 선택 → Workspace 연결
+   - 알림 받을 채널 선택
+
+5. **.env에 URL 추가**
+   ```bash
+   HEALTHCHECK_PING_URL=https://hc-ping.com/your-uuid
+   ```
+
+6. **Worker 재시작**
+   ```bash
+   docker-compose down
+   docker-compose up -d
+   ```
+
+**동작 방식:**
+- Worker가 60초마다 Healthchecks.io에 "살아있음" 신호 전송
+- 3분 이상 신호 없으면 DOWN 판단 → Slack 알림 자동 전송
+
+---
+
+### 2. IP 변경 알림 (Slack)
+
+**목적**: 친구 컴퓨터의 공인 IP가 바뀌면 자동으로 Slack 알림 (알리고 화이트리스트 재등록 필요)
+
+**설정 방법:**
+
+1. **Slack Webhook URL 생성**
+   - Slack Workspace → Apps → Incoming Webhooks
+   - "Add to Slack" 클릭
+   - 알림 받을 채널 선택
+   - Webhook URL 복사 (예: `https://hooks.slack.com/services/T.../B.../...`)
+
+2. **.env에 URL 추가**
+   ```bash
+   SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T00000000/B00000000/XXXX
+   ```
+
+3. **Worker 재시작**
+   ```bash
+   docker-compose down
+   docker-compose up -d
+   ```
+
+**동작 방식:**
+- Worker 시작 시: 현재 IP를 Slack에 알림
+- 1시간마다: 공인 IP 체크
+- IP 변경 감지 시: 즉시 Slack 알림 전송 (이전 IP, 새 IP, 조치 방법 안내)
+
+**알림 예시:**
+```
+⚠️ IP 주소가 변경되었습니다!
+
+이전 IP: 123.456.789.012
+새 IP: 123.456.789.099
+
+📋 조치 필요:
+1. 알리고 관리 페이지 접속
+2. 화이트리스트에서 기존 IP 삭제
+3. 새 IP 123.456.789.099 등록
+```
+
+---
+
 ## 📚 관련 문서
 
 - **Runway API Docs**: https://docs.dev.runwayml.com/api
@@ -466,6 +628,6 @@ MIT
 
 ---
 
-**작성일**: 2025-01-05
-**버전**: 1.0.0
+**작성일**: 2025-01-22
+**버전**: 2.0.0 (알리고 프록시 + 모니터링 추가)
 **문의**: Slack #backend-team

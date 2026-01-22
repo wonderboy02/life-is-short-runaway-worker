@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code
 COPY worker/ ./worker/
 COPY scripts/ ./scripts/
+COPY main.py .
 
 # Create directories
 RUN mkdir -p temp logs
@@ -24,9 +25,12 @@ RUN mkdir -p temp logs
 # Make scripts executable
 RUN chmod +x scripts/*.sh 2>/dev/null || true
 
-# Health check
-HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
-  CMD bash scripts/health_check.sh || exit 1
+# Expose FastAPI port
+EXPOSE 8000
 
-# Run worker
-CMD ["python", "-u", "worker/worker.py", "worker/config.yaml"]
+# Health check (FastAPI health endpoint)
+HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Run integrated worker (Runway Worker + FastAPI + Healthcheck + IP Monitor)
+CMD ["python", "-u", "main.py", "worker/config.yaml"]
